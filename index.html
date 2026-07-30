@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Ropitone — Compteur de sauts à corde</title>
+<meta name="theme-color" content="#111827" />
+<link rel="manifest" href="./manifest.json" />
+<link rel="apple-touch-icon" href="./icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+
+<main id="app" data-state="idle">
+
+  <!-- IDLE -->
+  <section class="screen" data-screen="idle">
+    <h1>Ropitone</h1>
+    <p class="subtitle">Compteur de sauts à corde</p>
+
+    <div class="best-score">
+      <span class="best-score-label">Meilleur score</span>
+      <span class="best-score-value" data-role="best-score">—</span>
+    </div>
+
+    <label class="sensitivity">
+      <span>Sensibilité</span>
+      <input type="range" min="1" max="10" step="1" value="6" data-role="sensitivity-slider" />
+    </label>
+
+    <button class="btn btn-primary" data-action="start">Démarrer une session</button>
+    <button class="btn btn-secondary" data-action="show-history">Historique</button>
+
+    <p class="error" data-role="idle-error" hidden></p>
+  </section>
+
+  <!-- CALIBRATING -->
+  <section class="screen" data-screen="calibrating">
+    <h2>Calibration</h2>
+    <p>Pose le téléphone au sol près de toi et reste silencieux…</p>
+    <div class="progress-ring" data-role="calibration-progress"></div>
+  </section>
+
+  <!-- GET_READY -->
+  <section class="screen" data-screen="get-ready">
+    <p>Prépare-toi</p>
+    <div class="countdown" data-role="countdown">3</div>
+  </section>
+
+  <!-- COUNTING -->
+  <section class="screen" data-screen="counting">
+    <div class="pulse" data-role="pulse"></div>
+    <div class="counter" data-role="counter">0</div>
+    <div class="stats-row">
+      <span data-role="timer">00:00</span>
+      <span data-role="pace">0 sauts/min</span>
+    </div>
+    <div class="mic-level-track">
+      <div class="mic-level-fill" data-role="mic-level"></div>
+    </div>
+    <label class="sensitivity sensitivity-live">
+      <span>Sensibilité</span>
+      <input type="range" min="1" max="10" step="1" value="6" data-role="sensitivity-slider-live" />
+    </label>
+    <button class="btn btn-danger" data-action="stop">Arrêter</button>
+  </section>
+
+  <!-- SUMMARY -->
+  <section class="screen" data-screen="summary">
+    <h2>Session terminée</h2>
+    <div class="summary-count" data-role="summary-count">0</div>
+    <p data-role="summary-details">0:00 · 0 sauts/min</p>
+    <p class="new-best" data-role="new-best" hidden>🏆 Nouveau record !</p>
+    <button class="btn btn-primary" data-action="new-session">Nouvelle session</button>
+    <button class="btn btn-secondary" data-action="show-history">Historique</button>
+  </section>
+
+  <!-- HISTORY -->
+  <section class="screen" data-screen="history">
+    <h2>Historique</h2>
+    <div class="best-score">
+      <span class="best-score-label">Meilleur score</span>
+      <span class="best-score-value" data-role="history-best-score">—</span>
+    </div>
+    <ul class="history-list" data-role="history-list"></ul>
+    <p class="empty-history" data-role="history-empty" hidden>Aucune session enregistrée.</p>
+    <button class="btn btn-secondary" data-action="clear-history">Effacer l'historique</button>
+    <button class="btn btn-primary" data-action="back-to-idle">Retour</button>
+  </section>
+
+</main>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>
