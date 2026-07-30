@@ -3,11 +3,11 @@
 
 const REFRACTORY_MS = 250; // hard floor on inter-hit spacing (~240 jumps/min ceiling)
 const HYSTERESIS_FACTOR = 0.65; // must fall below threshold*this before re-arming
-const MIN_ABS_THRESHOLD = 0.02; // guards near-silent rooms where stddev ~= 0
+const MIN_ABS_THRESHOLD = 0.006; // guards near-silent rooms where stddev ~= 0
 const MAX_THRESHOLD = 0.9;
 const ATTACK_WINDOW = 8; // frames of short-term average used for the attack/derivative guard
-const ATTACK_DELTA_FACTOR = 0.4; // required jump above short-term average, as a fraction of (threshold - baseline)
-const HFC_MIN_RATIO = 0.22; // minimum high-frequency-content ratio for a hit to count as percussive
+const ATTACK_DELTA_FACTOR = 0.25; // required jump above short-term average, as a fraction of (threshold - baseline)
+const HFC_MIN_RATIO = 0.15; // minimum high-frequency-content ratio for a hit to count as percussive
 const BASELINE_EMA_TAU_MS = 3000; // slow drift tracking of the noise floor while quiet
 
 function computeRms(timeDomainData) {
@@ -29,9 +29,12 @@ function computeHfcRatio(freqData) {
   return total > 0 ? high / total : 0;
 }
 
+const K_AT_MIN_SENSITIVITY = 10; // slider 1
+const K_AT_MAX_SENSITIVITY = 1.5; // slider 10
+
 export function sensitivityToK(sensitivity) {
-  // slider 1 (least sensitive) -> k=12, slider 10 (most sensitive) -> k=3
-  return 13 - sensitivity;
+  const t = (sensitivity - 1) / 9; // 0 at slider=1, 1 at slider=10
+  return K_AT_MIN_SENSITIVITY - t * (K_AT_MIN_SENSITIVITY - K_AT_MAX_SENSITIVITY);
 }
 
 export class AudioEngine extends EventTarget {
@@ -148,7 +151,8 @@ export class AudioEngine extends EventTarget {
 
     const tick = () => {
       const rms = this._readRms();
-      this.dispatchEvent(new CustomEvent("level", { detail: { rms, threshold: this.threshold } }));
+      this.analyser.getByteFrequencyData(this.freqBuffer);
+      const hfcRatio = computeHfcRatio(this.freqBuffer);
 
       const shortTermAvg =
         this.recentRms.length > 0
@@ -159,14 +163,26 @@ export class AudioEngine extends EventTarget {
       const aboveThreshold = rms > this.threshold;
       const belowRearm = rms < this.threshold * HYSTERESIS_FACTOR;
 
-      if (this.state === "BELOW" && aboveThreshold && now - this.lastHitTime > REFRACTORY_MS) {
-        const attackDelta = rms - shortTermAvg;
-        const requiredDelta =
-          (this.threshold - (this.baselineEma ?? this.baseline?.mean ?? 0)) * ATTACK_DELTA_FACTOR;
-        const hasSharpAttack = attackDelta >= requiredDelta;
+      const attackDelta = rms - shortTermAvg;
+      const requiredDelta =
+        (this.threshold - (this.baselineEma ?? this.baseline?.mean ?? 0)) * ATTACK_DELTA_FACTOR;
 
-        this.analyser.getByteFrequencyData(this.freqBuffer);
-        const hfcRatio = computeHfcRatio(this.freqBuffer);
+      this.dispatchEvent(
+        new CustomEvent("level", {
+          detail: {
+            rms,
+            threshold: this.threshold,
+            hysteresisThreshold: this.threshold * HYSTERESIS_FACTOR,
+            hfcRatio,
+            attackDelta,
+            requiredDelta,
+            state: this.state,
+          },
+        })
+      );
+
+      if (this.state === "BELOW" && aboveThreshold && now - this.lastHitTime > REFRACTORY_MS) {
+        const hasSharpAttack = attackDelta >= requiredDelta;
         const isPercussive = hfcRatio >= HFC_MIN_RATIO;
 
         if (hasSharpAttack && isPercussive) {

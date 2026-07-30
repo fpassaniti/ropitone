@@ -179,3 +179,19 @@ h2 { font-size: 1.4rem; margin: 0; }
 .history-item-count { font-weight: 700; }
 .history-item-meta { color: var(--muted); font-size: 0.8rem; }
 .empty-history { color: var(--muted); }
+
+#debug-panel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  background: rgba(0, 0, 0, 0.75);
+  color: #7dffb0;
+  font-size: 0.7rem;
+  line-height: 1.3;
+  white-space: pre-wrap;
+  pointer-events: none;
+}

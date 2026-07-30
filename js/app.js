@@ -1,4 +1,4 @@
-import { AudioEngine } from "./audio.js";
+import { AudioEngine, sensitivityToK } from "./audio.js";
 import { WakeLockController } from "./wakelock.js";
 import * as ui from "./ui.js";
 import * as storage from "./storage.js";
@@ -7,14 +7,19 @@ const CALIBRATION_MS = 2500;
 const GET_READY_SECONDS = 3;
 
 const wakeLock = new WakeLockController();
+const debugEnabled = new URLSearchParams(location.search).has("debug");
+const debugPanel = document.querySelector('[data-role="debug-panel"]');
 
 let audioEngine = null;
 let sessionStartTime = 0;
 let timerIntervalId = null;
 let hitCount = 0;
 let currentSensitivity = 6;
+let lastHitTimestamp = null;
 
 function init() {
+  if (debugEnabled) debugPanel.hidden = false;
+
   const settings = storage.loadSettings();
   currentSensitivity = settings.sensitivity;
   ui.setSensitivityValue(currentSensitivity);
@@ -88,6 +93,7 @@ function runGetReadyCountdown() {
 
 function startCountingSession() {
   hitCount = 0;
+  lastHitTimestamp = null;
   ui.setCounter(0);
   ui.setTimer(0);
   ui.setPace(0);
@@ -102,15 +108,26 @@ function startCountingSession() {
   timerIntervalId = setInterval(updateTimerAndPace, 200);
 }
 
-function onHit() {
+function onHit(e) {
   hitCount += 1;
   ui.setCounter(hitCount);
   ui.pulse();
+  lastHitTimestamp = e.detail.timestamp;
 }
 
 function onLevel(e) {
   const ratio = e.detail.threshold > 0 ? e.detail.rms / e.detail.threshold : 0;
   ui.setMicLevel(ratio);
+  if (debugEnabled) renderDebugPanel(e.detail);
+}
+
+function renderDebugPanel(d) {
+  const interval = lastHitTimestamp != null ? Math.round(performance.now() - lastHitTimestamp) : "-";
+  debugPanel.textContent =
+    `sensibilité: ${currentSensitivity} (k=${sensitivityToK(currentSensitivity).toFixed(2)})\n` +
+    `rms: ${d.rms.toFixed(4)}  seuil: ${d.threshold.toFixed(4)}  hystérésis: ${d.hysteresisThreshold.toFixed(4)}\n` +
+    `état: ${d.state}  hfc: ${d.hfcRatio.toFixed(2)}  attaque: ${d.attackDelta.toFixed(4)}/${d.requiredDelta.toFixed(4)}\n` +
+    `dernier hit il y a: ${interval}ms  total: ${hitCount}`;
 }
 
 function updateTimerAndPace() {
