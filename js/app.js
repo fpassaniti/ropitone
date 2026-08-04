@@ -1,4 +1,4 @@
-import { AudioEngine, sensitivityToK } from "./audio.js";
+import { AudioEngine, sensitivityToK, sensitivityToGain } from "./audio.js";
 import { WakeLockController } from "./wakelock.js";
 import * as ui from "./ui.js";
 import * as storage from "./storage.js";
@@ -31,6 +31,7 @@ function init() {
     onShowHistory: handleShowHistory,
     onBackToIdle: handleBackToIdle,
     onClearHistory: handleClearHistory,
+    onResetTrip: handleResetTrip,
     onSensitivityChange: handleSensitivityChange,
   });
   ui.setState("idle");
@@ -124,7 +125,7 @@ function onLevel(e) {
 function renderDebugPanel(d) {
   const interval = lastHitTimestamp != null ? Math.round(performance.now() - lastHitTimestamp) : "-";
   debugPanel.textContent =
-    `sensibilité: ${currentSensitivity} (k=${sensitivityToK(currentSensitivity).toFixed(2)})\n` +
+    `sensibilité: ${currentSensitivity} (k=${sensitivityToK(currentSensitivity).toFixed(2)}, gain=${sensitivityToGain(currentSensitivity).toFixed(2)}x)\n` +
     `rms: ${d.rms.toFixed(4)}  seuil: ${d.threshold.toFixed(4)}  hystérésis: ${d.hysteresisThreshold.toFixed(4)}\n` +
     `état: ${d.state}  hfc: ${d.hfcRatio.toFixed(2)}  attaque: ${d.attackDelta.toFixed(4)}/${d.requiredDelta.toFixed(4)}\n` +
     `dernier hit il y a: ${interval}ms  total: ${hitCount}`;
@@ -165,6 +166,7 @@ function handleNewSession() {
 function handleShowHistory() {
   ui.renderHistory(storage.loadSessions());
   ui.setBestScore(storage.getBestScore());
+  ui.setStats(storage.getStats());
   ui.setState("history");
 }
 
@@ -173,9 +175,14 @@ function handleBackToIdle() {
 }
 
 function handleClearHistory() {
+  if (!window.confirm("Effacer tout l'historique des sessions ? Cette action est irréversible.")) return;
   storage.clearHistory();
   ui.renderHistory([]);
   ui.setBestScore(storage.getBestScore());
+}
+
+function handleResetTrip() {
+  ui.setStats(storage.resetTrip());
 }
 
 function handleSensitivityChange(value) {

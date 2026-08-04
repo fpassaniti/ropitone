@@ -37,12 +37,21 @@ export function sensitivityToK(sensitivity) {
   return K_AT_MIN_SENSITIVITY - t * (K_AT_MIN_SENSITIVITY - K_AT_MAX_SENSITIVITY);
 }
 
+const GAIN_AT_MIN_SENSITIVITY = 1; // slider 1 — no boost
+const GAIN_AT_MAX_SENSITIVITY = 6; // slider 10 — starting point, tune on real device
+
+export function sensitivityToGain(sensitivity) {
+  const t = (sensitivity - 1) / 9; // 0 at slider=1, 1 at slider=10
+  return GAIN_AT_MIN_SENSITIVITY + t * (GAIN_AT_MAX_SENSITIVITY - GAIN_AT_MIN_SENSITIVITY);
+}
+
 export class AudioEngine extends EventTarget {
   constructor() {
     super();
     this.stream = null;
     this.audioContext = null;
     this.analyser = null;
+    this.gainNode = null;
     this.timeDomainBuffer = null;
     this.freqBuffer = null;
     this.rafId = null;
@@ -77,7 +86,11 @@ export class AudioEngine extends EventTarget {
     this.analyser = this.audioContext.createAnalyser();
     this.analyser.fftSize = 1024;
     this.analyser.smoothingTimeConstant = 0;
-    source.connect(this.analyser);
+
+    this.gainNode = this.audioContext.createGain();
+    this.gainNode.gain.value = sensitivityToGain(this.sensitivity);
+    source.connect(this.gainNode);
+    this.gainNode.connect(this.analyser);
 
     this.timeDomainBuffer = new Float32Array(this.analyser.fftSize);
     this.freqBuffer = new Uint8Array(this.analyser.frequencyBinCount);
@@ -140,7 +153,28 @@ export class AudioEngine extends EventTarget {
   }
 
   setSensitivity(sensitivity) {
+    const oldGain = this.gainNode ? sensitivityToGain(this.sensitivity) : null;
     this.sensitivity = sensitivity;
+
+    if (this.gainNode) {
+      const newGain = sensitivityToGain(this.sensitivity);
+      const ratio = newGain / oldGain;
+
+      this.gainNode.gain.setTargetAtTime(newGain, this.audioContext.currentTime, 0.01);
+
+      // RMS scales linearly with gain, so existing calibration data must be
+      // rescaled to stay consistent with now-differently-scaled live readings.
+      if (this.baseline) {
+        this.baseline = {
+          mean: this.baseline.mean * ratio,
+          stddev: this.baseline.stddev * ratio,
+          max: this.baseline.max * ratio,
+        };
+      }
+      if (this.baselineEma != null) this.baselineEma *= ratio;
+      if (this.recentRms.length > 0) this.recentRms = this.recentRms.map((v) => v * ratio);
+    }
+
     this._recomputeThreshold();
   }
 
@@ -226,5 +260,6 @@ export class AudioEngine extends EventTarget {
     this.stream = null;
     this.audioContext = null;
     this.analyser = null;
+    this.gainNode = null;
   }
 }

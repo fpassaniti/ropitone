@@ -18,6 +18,9 @@ const el = {
   historyBestScore: document.querySelector('[data-role="history-best-score"]'),
   historyList: document.querySelector('[data-role="history-list"]'),
   historyEmpty: document.querySelector('[data-role="history-empty"]'),
+  alltimeTotal: document.querySelector('[data-role="alltime-total"]'),
+  tripTotal: document.querySelector('[data-role="trip-total"]'),
+  tripMeta: document.querySelector('[data-role="trip-meta"]'),
 };
 
 let pulseTimeoutId = null;
@@ -106,6 +109,12 @@ export function setSummary({ count, durationSeconds, jumpsPerMinute, isNewBest }
   const ss = String(Math.floor(durationSeconds % 60)).padStart(2, "0");
   el.summaryDetails.textContent = `${mm}:${ss} · ${jumpsPerMinute} sauts/min`;
   el.newBest.hidden = !isNewBest;
+}
+
+export function setStats({ allTimeTotal, tripTotal, tripStartDate }) {
+  el.alltimeTotal.textContent = `${allTimeTotal} sauts`;
+  el.tripTotal.textContent = `${tripTotal} sauts`;
+  el.tripMeta.textContent = tripStartDate ? `depuis le ${new Date(tripStartDate).toLocaleDateString()}` : "";
 }
 
 export function renderHistory(sessions) {

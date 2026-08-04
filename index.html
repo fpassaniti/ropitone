@@ -7,6 +7,7 @@
 <meta name="theme-color" content="#111827" />
 <link rel="manifest" href="./manifest.json" />
 <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+<link rel="icon" type="image/x-icon" href="/icons/favicon.png">
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <link rel="stylesheet" href="./style.css" />
@@ -86,6 +87,18 @@
       <span class="best-score-label">Meilleur score</span>
       <span class="best-score-value" data-role="history-best-score">—</span>
     </div>
+    <div class="stats-grid">
+      <div class="stat-box">
+        <span class="stat-label">Total all time</span>
+        <span class="stat-value" data-role="alltime-total">—</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Compteur en cours</span>
+        <span class="stat-value" data-role="trip-total">—</span>
+        <span class="trip-meta" data-role="trip-meta"></span>
+      </div>
+    </div>
+    <button class="btn btn-secondary" data-action="reset-trip">Réinitialiser le compteur</button>
     <ul class="history-list" data-role="history-list"></ul>
     <p class="empty-history" data-role="history-empty" hidden>Aucune session enregistrée.</p>
     <button class="btn btn-secondary" data-action="clear-history">Effacer l'historique</button>

@@ -1,7 +1,9 @@
 const SESSIONS_KEY = "ropitone:v1:sessions";
 const SETTINGS_KEY = "ropitone:v1:settings";
+const STATS_KEY = "ropitone:v1:stats";
 const MAX_SESSIONS = 200;
 const DEFAULT_SETTINGS = { sensitivity: 6 };
+const DEFAULT_STATS = { allTimeTotal: 0, tripTotal: 0, tripStartDate: null };
 
 function readJson(key, fallback) {
   try {
@@ -29,6 +31,13 @@ export function saveSession(session) {
   sessions.unshift(session);
   if (sessions.length > MAX_SESSIONS) sessions.length = MAX_SESSIONS;
   writeJson(SESSIONS_KEY, sessions);
+
+  const stats = getStats();
+  stats.allTimeTotal += session.count;
+  stats.tripTotal += session.count;
+  if (!stats.tripStartDate) stats.tripStartDate = new Date().toISOString();
+  writeJson(STATS_KEY, stats);
+
   return sessions;
 }
 
@@ -39,6 +48,18 @@ export function getBestScore() {
 
 export function clearHistory() {
   writeJson(SESSIONS_KEY, []);
+}
+
+export function getStats() {
+  return { ...DEFAULT_STATS, ...readJson(STATS_KEY, {}) };
+}
+
+export function resetTrip() {
+  const stats = getStats();
+  stats.tripTotal = 0;
+  stats.tripStartDate = new Date().toISOString();
+  writeJson(STATS_KEY, stats);
+  return stats;
 }
 
 export function loadSettings() {
