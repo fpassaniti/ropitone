@@ -14,7 +14,7 @@ const el = {
   micLevel: document.querySelector('[data-role="mic-level"]'),
   summaryCount: document.querySelector('[data-role="summary-count"]'),
   summaryDetails: document.querySelector('[data-role="summary-details"]'),
-  newBest: document.querySelector('[data-role="new-best"]'),
+  newBestRow: document.querySelector('[data-role="new-best-row"]'),
   historyBestScore: document.querySelector('[data-role="history-best-score"]'),
   historyList: document.querySelector('[data-role="history-list"]'),
   historyEmpty: document.querySelector('[data-role="history-empty"]'),
@@ -28,7 +28,7 @@ let pulseTimeoutId = null;
 export function init(actions) {
   document.querySelectorAll("[data-action]").forEach((button) => {
     const action = button.dataset.action;
-    button.addEventListener("click", () => actions[toCamelCase("on-" + action)]?.());
+    button.addEventListener("click", () => actions[toCamelCase("on-" + action)]?.(button));
   });
 
   el.sensitivitySlider.addEventListener("input", (e) => {
@@ -108,7 +108,14 @@ export function setSummary({ count, durationSeconds, jumpsPerMinute, isNewBest }
   const mm = String(Math.floor(durationSeconds / 60)).padStart(2, "0");
   const ss = String(Math.floor(durationSeconds % 60)).padStart(2, "0");
   el.summaryDetails.textContent = `${mm}:${ss} · ${jumpsPerMinute} sauts/min`;
-  el.newBest.hidden = !isNewBest;
+  el.newBestRow.hidden = !isNewBest;
+}
+
+export function showCopiedFeedback(button) {
+  button.dataset.copied = "true";
+  setTimeout(() => {
+    delete button.dataset.copied;
+  }, 1500);
 }
 
 export function setStats({ allTimeTotal, tripTotal, tripStartDate }) {

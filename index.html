@@ -75,7 +75,16 @@
     <h2>Session terminée</h2>
     <div class="summary-count" data-role="summary-count">0</div>
     <p data-role="summary-details">0:00 · 0 sauts/min</p>
-    <p class="new-best" data-role="new-best" hidden>🏆 Nouveau record !</p>
+    <div class="new-best-row" data-role="new-best-row" hidden>
+      <p class="new-best">🏆 Nouveau record !</p>
+      <button class="icon-btn" data-action="share-score" aria-label="Partager le score" title="Partager">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3v12" />
+          <path d="M8 7l4-4 4 4" />
+          <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
+        </svg>
+      </button>
+    </div>
     <button class="btn btn-primary" data-action="new-session">Nouvelle session</button>
     <button class="btn btn-secondary" data-action="show-history">Historique</button>
   </section>
@@ -86,16 +95,37 @@
     <div class="best-score">
       <span class="best-score-label">Meilleur score</span>
       <span class="best-score-value" data-role="history-best-score">—</span>
+      <button class="icon-btn icon-btn-corner" data-action="share-best" aria-label="Partager le meilleur score" title="Partager">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3v12" />
+          <path d="M8 7l4-4 4 4" />
+          <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
+        </svg>
+      </button>
     </div>
     <div class="stats-grid">
       <div class="stat-box">
         <span class="stat-label">Total all time</span>
         <span class="stat-value" data-role="alltime-total">—</span>
+        <button class="icon-btn icon-btn-corner" data-action="share-alltime" aria-label="Partager le total" title="Partager">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12" />
+            <path d="M8 7l4-4 4 4" />
+            <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
+          </svg>
+        </button>
       </div>
       <div class="stat-box">
         <span class="stat-label">Compteur en cours</span>
         <span class="stat-value" data-role="trip-total">—</span>
         <span class="trip-meta" data-role="trip-meta"></span>
+        <button class="icon-btn icon-btn-corner" data-action="share-trip" aria-label="Partager le compteur en cours" title="Partager">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12" />
+            <path d="M8 7l4-4 4 4" />
+            <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
+          </svg>
+        </button>
       </div>
     </div>
     <button class="btn btn-secondary" data-action="reset-trip">Réinitialiser le compteur</button>

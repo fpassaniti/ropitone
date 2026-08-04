@@ -33,6 +33,10 @@ function init() {
     onClearHistory: handleClearHistory,
     onResetTrip: handleResetTrip,
     onSensitivityChange: handleSensitivityChange,
+    onShareScore: handleShareScore,
+    onShareBest: handleShareBest,
+    onShareAlltime: handleShareAlltime,
+    onShareTrip: handleShareTrip,
   });
   ui.setState("idle");
 }
@@ -159,6 +163,42 @@ function handleStop() {
   ui.setState("summary");
 }
 
+async function shareText(message, button) {
+  if ("share" in navigator) {
+    try {
+      await navigator.share({ text: message });
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+    }
+    return;
+  }
+
+  if ("clipboard" in navigator && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(message);
+      ui.showCopiedFeedback(button);
+    } catch {
+      // écriture presse-papiers refusée/indisponible — rien à afficher
+    }
+  }
+}
+
+function handleShareScore(button) {
+  shareText(`Aujourd'hui, j'ai fait ${hitCount} sauts à la corde, nouveau record ! 🏆`, button);
+}
+
+function handleShareBest(button) {
+  shareText(`Mon record à la corde : ${storage.getBestScore()} sauts ! 🏆`, button);
+}
+
+function handleShareAlltime(button) {
+  shareText(`J'ai fait ${storage.getStats().allTimeTotal} sauts à la corde au total ! 🏆`, button);
+}
+
+function handleShareTrip(button) {
+  shareText(`${storage.getStats().tripTotal} sauts à la corde sur mon compteur en cours ! 🏆`, button);
+}
+
 function handleNewSession() {
   ui.setState("idle");
 }
@@ -177,8 +217,10 @@ function handleBackToIdle() {
 function handleClearHistory() {
   if (!window.confirm("Effacer tout l'historique des sessions ? Cette action est irréversible.")) return;
   storage.clearHistory();
+  storage.resetStats();
   ui.renderHistory([]);
   ui.setBestScore(storage.getBestScore());
+  ui.setStats(storage.getStats());
 }
 
 function handleResetTrip() {

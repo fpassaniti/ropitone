@@ -50,6 +50,11 @@ export function clearHistory() {
   writeJson(SESSIONS_KEY, []);
 }
 
+export function resetStats() {
+  writeJson(STATS_KEY, { ...DEFAULT_STATS });
+  return { ...DEFAULT_STATS };
+}
+
 export function getStats() {
   return { ...DEFAULT_STATS, ...readJson(STATS_KEY, {}) };
 }
