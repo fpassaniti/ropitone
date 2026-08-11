@@ -14,7 +14,13 @@
 </head>
 <body>
 
-<pre id="debug-panel" data-role="debug-panel" hidden></pre>
+<div id="debug-panel" data-role="debug-panel" hidden>
+  <div class="debug-controls">
+    <label>refractory (ms) <input type="text" inputmode="numeric" data-role="debug-refractory-input" /></label>
+    <label>hystérésis (0-1) <input type="text" inputmode="decimal" data-role="debug-hysteresis-input" /></label>
+  </div>
+  <pre data-role="debug-text"></pre>
+</div>
 
 <main id="app" data-state="idle">
 

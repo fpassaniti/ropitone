@@ -1,4 +1,4 @@
-import { AudioEngine, sensitivityToK, sensitivityToGain } from "./audio.js";
+import { AudioEngine, sensitivityToK, sensitivityToGain, REFRACTORY_MS, HYSTERESIS_FACTOR } from "./audio.js";
 import { WakeLockController } from "./wakelock.js";
 import * as ui from "./ui.js";
 import * as storage from "./storage.js";
@@ -9,6 +9,9 @@ const GET_READY_SECONDS = 3;
 const wakeLock = new WakeLockController();
 const debugEnabled = new URLSearchParams(location.search).has("debug");
 const debugPanel = document.querySelector('[data-role="debug-panel"]');
+const debugText = document.querySelector('[data-role="debug-text"]');
+const debugRefractoryInput = document.querySelector('[data-role="debug-refractory-input"]');
+const debugHysteresisInput = document.querySelector('[data-role="debug-hysteresis-input"]');
 
 let audioEngine = null;
 let sessionStartTime = 0;
@@ -16,9 +19,29 @@ let timerIntervalId = null;
 let hitCount = 0;
 let currentSensitivity = 6;
 let lastHitTimestamp = null;
+let debugRefractoryMs = REFRACTORY_MS;
+let debugHysteresisFactor = HYSTERESIS_FACTOR;
 
 function init() {
-  if (debugEnabled) debugPanel.hidden = false;
+  if (debugEnabled) {
+    debugPanel.hidden = false;
+    debugRefractoryInput.value = String(debugRefractoryMs);
+    debugHysteresisInput.value = String(debugHysteresisFactor);
+    debugRefractoryInput.addEventListener("input", () => {
+      const value = Number(debugRefractoryInput.value);
+      if (Number.isFinite(value) && value >= 0) {
+        debugRefractoryMs = value;
+        audioEngine?.setRefractoryMs(value);
+      }
+    });
+    debugHysteresisInput.addEventListener("input", () => {
+      const value = Number(debugHysteresisInput.value);
+      if (Number.isFinite(value) && value >= 0) {
+        debugHysteresisFactor = value;
+        audioEngine?.setHysteresisFactor(value);
+      }
+    });
+  }
 
   const settings = storage.loadSettings();
   currentSensitivity = settings.sensitivity;
@@ -45,6 +68,10 @@ async function handleStart() {
   ui.setIdleError(null);
   audioEngine = new AudioEngine();
   audioEngine.setSensitivity(currentSensitivity);
+  if (debugEnabled) {
+    audioEngine.setRefractoryMs(debugRefractoryMs);
+    audioEngine.setHysteresisFactor(debugHysteresisFactor);
+  }
 
   try {
     await audioEngine.start();
@@ -128,7 +155,7 @@ function onLevel(e) {
 
 function renderDebugPanel(d) {
   const interval = lastHitTimestamp != null ? Math.round(performance.now() - lastHitTimestamp) : "-";
-  debugPanel.textContent =
+  debugText.textContent =
     `sensibilité: ${currentSensitivity} (k=${sensitivityToK(currentSensitivity).toFixed(2)}, gain=${sensitivityToGain(currentSensitivity).toFixed(2)}x)\n` +
     `rms: ${d.rms.toFixed(4)}  seuil: ${d.threshold.toFixed(4)}  hystérésis: ${d.hysteresisThreshold.toFixed(4)}\n` +
     `état: ${d.state}  hfc: ${d.hfcRatio.toFixed(2)}  attaque: ${d.attackDelta.toFixed(4)}/${d.requiredDelta.toFixed(4)}\n` +

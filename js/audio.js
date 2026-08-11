@@ -1,8 +1,8 @@
 // Jump detection engine: microphone capture + percussive onset detection.
 // Emits DOM-style events: 'hit', 'level', 'calibration-progress', 'calibration-done', 'error'.
 
-const REFRACTORY_MS = 250; // hard floor on inter-hit spacing (~240 jumps/min ceiling)
-const HYSTERESIS_FACTOR = 0.65; // must fall below threshold*this before re-arming
+export const REFRACTORY_MS = 250; // hard floor on inter-hit spacing (~240 jumps/min ceiling)
+export const HYSTERESIS_FACTOR = 0.65; // must fall below threshold*this before re-arming
 const MIN_ABS_THRESHOLD = 0.006; // guards near-silent rooms where stddev ~= 0
 const MAX_THRESHOLD = 0.9;
 const ATTACK_WINDOW = 8; // frames of short-term average used for the attack/derivative guard
@@ -59,6 +59,8 @@ export class AudioEngine extends EventTarget {
     this.baselineEma = null;
     this.threshold = MIN_ABS_THRESHOLD;
     this.sensitivity = 6;
+    this.refractoryMs = REFRACTORY_MS;
+    this.hysteresisFactor = HYSTERESIS_FACTOR;
     this.state = "BELOW";
     this.lastHitTime = 0;
     this.recentRms = [];
@@ -178,6 +180,14 @@ export class AudioEngine extends EventTarget {
     this._recomputeThreshold();
   }
 
+  setRefractoryMs(ms) {
+    this.refractoryMs = ms;
+  }
+
+  setHysteresisFactor(factor) {
+    this.hysteresisFactor = factor;
+  }
+
   startCounting() {
     this.state = "BELOW";
     this.lastHitTime = 0;
@@ -195,7 +205,7 @@ export class AudioEngine extends EventTarget {
 
       const now = performance.now();
       const aboveThreshold = rms > this.threshold;
-      const belowRearm = rms < this.threshold * HYSTERESIS_FACTOR;
+      const belowRearm = rms < this.threshold * this.hysteresisFactor;
 
       const attackDelta = rms - shortTermAvg;
       const requiredDelta =
@@ -206,7 +216,7 @@ export class AudioEngine extends EventTarget {
           detail: {
             rms,
             threshold: this.threshold,
-            hysteresisThreshold: this.threshold * HYSTERESIS_FACTOR,
+            hysteresisThreshold: this.threshold * this.hysteresisFactor,
             hfcRatio,
             attackDelta,
             requiredDelta,
@@ -215,7 +225,7 @@ export class AudioEngine extends EventTarget {
         })
       );
 
-      if (this.state === "BELOW" && aboveThreshold && now - this.lastHitTime > REFRACTORY_MS) {
+      if (this.state === "BELOW" && aboveThreshold && now - this.lastHitTime > this.refractoryMs) {
         const hasSharpAttack = attackDelta >= requiredDelta;
         const isPercussive = hfcRatio >= HFC_MIN_RATIO;
 
