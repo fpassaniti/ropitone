@@ -10,6 +10,15 @@ const ATTACK_DELTA_FACTOR = 0.25; // required jump above short-term average, as 
 const HFC_MIN_RATIO = 0.15; // minimum high-frequency-content ratio for a hit to count as percussive
 const BASELINE_EMA_TAU_MS = 3000; // slow drift tracking of the noise floor while quiet
 
+// Flux-based onset detection (alternative algorithm, toggled via the debug panel)
+export const FLUX_SMOOTH_FRAMES = 3; // moving-average window applied to raw per-frame flux
+export const FLUX_WINDOW_FRAMES = 30; // trailing window (~0.5s at 60fps) for adaptive mean/stddev
+export const FLUX_ABS_FLOOR_STDDEV_MULT = 3; // absolute floor = calibration flux mean + this * calibration flux stddev
+export const FLUX_FLOOR_DECAY_FACTOR = 0.999; // per-frame leaky-max decay of the adaptive floor (slow fall, instant rise)
+export const FLUX_PEAK_MARGIN_FACTOR = 0.1; // required margin above threshold, as a fraction of threshold
+const K_AT_MIN_SENSITIVITY_FLUX = 4; // slider 1
+const K_AT_MAX_SENSITIVITY_FLUX = 1.5; // slider 10
+
 function computeRms(timeDomainData) {
   let sumSquares = 0;
   for (let i = 0; i < timeDomainData.length; i++) {
@@ -45,6 +54,11 @@ export function sensitivityToGain(sensitivity) {
   return GAIN_AT_MIN_SENSITIVITY + t * (GAIN_AT_MAX_SENSITIVITY - GAIN_AT_MIN_SENSITIVITY);
 }
 
+export function sensitivityToFluxK(sensitivity) {
+  const t = (sensitivity - 1) / 9; // 0 at slider=1, 1 at slider=10
+  return K_AT_MIN_SENSITIVITY_FLUX - t * (K_AT_MIN_SENSITIVITY_FLUX - K_AT_MAX_SENSITIVITY_FLUX);
+}
+
 export class AudioEngine extends EventTarget {
   constructor() {
     super();
@@ -64,6 +78,17 @@ export class AudioEngine extends EventTarget {
     this.state = "BELOW";
     this.lastHitTime = 0;
     this.recentRms = [];
+    this.detectionMode = "legacy"; // "legacy" | "flux"
+    this.prevFreqBuffer = null;
+    this.fluxBaseline = null; // { mean, stddev }
+    this.fluxHistory = [];
+    this.fluxRecent = [];
+    this.fluxFrames = [];
+    this.fluxFloorSmoothed = 0;
+    this.fluxWindowFrames = FLUX_WINDOW_FRAMES;
+    this.fluxFloorDecayFactor = FLUX_FLOOR_DECAY_FACTOR;
+    this.fluxAbsFloorMultiplier = FLUX_ABS_FLOOR_STDDEV_MULT;
+    this.fluxPeakMarginFactor = FLUX_PEAK_MARGIN_FACTOR;
     this._onVisibilityChange = this._onVisibilityChange.bind(this);
   }
 
@@ -96,6 +121,7 @@ export class AudioEngine extends EventTarget {
 
     this.timeDomainBuffer = new Float32Array(this.analyser.fftSize);
     this.freqBuffer = new Uint8Array(this.analyser.frequencyBinCount);
+    this.prevFreqBuffer = new Uint8Array(this.analyser.frequencyBinCount);
 
     document.addEventListener("visibilitychange", this._onVisibilityChange);
   }
@@ -115,14 +141,27 @@ export class AudioEngine extends EventTarget {
     return computeRms(this.timeDomainBuffer);
   }
 
+  _computeFlux(freqData) {
+    let flux = 0;
+    for (let i = 0; i < freqData.length; i++) {
+      const diff = freqData[i] - this.prevFreqBuffer[i];
+      if (diff > 0) flux += diff;
+      this.prevFreqBuffer[i] = freqData[i];
+    }
+    return flux;
+  }
+
   calibrate(durationMs = 2500) {
     return new Promise((resolve) => {
       const samples = [];
+      const fluxSamples = [];
       const startTime = performance.now();
 
       const tick = () => {
         const rms = this._readRms();
         samples.push(rms);
+        this.analyser.getByteFrequencyData(this.freqBuffer);
+        fluxSamples.push(this._computeFlux(this.freqBuffer));
         const elapsed = performance.now() - startTime;
         const progress = Math.min(1, elapsed / durationMs);
         this.dispatchEvent(new CustomEvent("calibration-progress", { detail: { progress } }));
@@ -137,6 +176,14 @@ export class AudioEngine extends EventTarget {
           this.baseline = { mean, stddev, max };
           this.baselineEma = mean;
           this._recomputeThreshold();
+
+          const fluxMean = fluxSamples.reduce((a, b) => a + b, 0) / fluxSamples.length;
+          const fluxVariance =
+            fluxSamples.reduce((a, b) => a + (b - fluxMean) ** 2, 0) / fluxSamples.length;
+          this.fluxBaseline = { mean: fluxMean, stddev: Math.sqrt(fluxVariance) };
+          this.fluxFloorSmoothed = fluxMean;
+          this.fluxHistory = fluxSamples.slice(-this.fluxWindowFrames);
+
           this.dispatchEvent(new CustomEvent("calibration-done", { detail: { ...this.baseline } }));
           resolve(this.baseline);
         }
@@ -188,6 +235,146 @@ export class AudioEngine extends EventTarget {
     this.hysteresisFactor = factor;
   }
 
+  setDetectionMode(mode) {
+    this.detectionMode = mode;
+    this.state = "BELOW";
+    this.lastHitTime = 0;
+    this.recentRms = [];
+    this.fluxRecent = [];
+    this.fluxFrames = [];
+    this.fluxHistory = [];
+    this.fluxFloorSmoothed = this.fluxBaseline?.mean ?? 0;
+  }
+
+  setFluxWindowFrames(n) {
+    this.fluxWindowFrames = n;
+  }
+
+  setFluxFloorDecayFactor(f) {
+    this.fluxFloorDecayFactor = f;
+  }
+
+  setFluxAbsFloorMultiplier(m) {
+    this.fluxAbsFloorMultiplier = m;
+  }
+
+  setFluxPeakMarginFactor(f) {
+    this.fluxPeakMarginFactor = f;
+  }
+
+  _tickLegacy(rms, now) {
+    const hfcRatio = computeHfcRatio(this.freqBuffer);
+
+    const shortTermAvg =
+      this.recentRms.length > 0
+        ? this.recentRms.reduce((a, b) => a + b, 0) / this.recentRms.length
+        : rms;
+
+    const aboveThreshold = rms > this.threshold;
+    const belowRearm = rms < this.threshold * this.hysteresisFactor;
+
+    const attackDelta = rms - shortTermAvg;
+    const requiredDelta =
+      (this.threshold - (this.baselineEma ?? this.baseline?.mean ?? 0)) * ATTACK_DELTA_FACTOR;
+
+    this.dispatchEvent(
+      new CustomEvent("level", {
+        detail: {
+          mode: "legacy",
+          rms,
+          threshold: this.threshold,
+          hysteresisThreshold: this.threshold * this.hysteresisFactor,
+          hfcRatio,
+          attackDelta,
+          requiredDelta,
+          state: this.state,
+        },
+      })
+    );
+
+    if (this.state === "BELOW" && aboveThreshold && now - this.lastHitTime > this.refractoryMs) {
+      const hasSharpAttack = attackDelta >= requiredDelta;
+      const isPercussive = hfcRatio >= HFC_MIN_RATIO;
+
+      if (hasSharpAttack && isPercussive) {
+        this.lastHitTime = now;
+        this.state = "ABOVE";
+        this.dispatchEvent(new CustomEvent("hit", { detail: { timestamp: now, rms, hfcRatio } }));
+      }
+    } else if (this.state === "ABOVE" && belowRearm) {
+      this.state = "BELOW";
+    }
+
+    // slow-following baseline drift, only while quiet, so it never absorbs jump peaks
+    if (this.state === "BELOW" && this.baselineEma != null) {
+      const dt = 16; // approx ms per rAF tick, good enough for this slow EMA
+      const alpha = dt / (BASELINE_EMA_TAU_MS + dt);
+      this.baselineEma = this.baselineEma + alpha * (rms - this.baselineEma);
+      this._recomputeThreshold();
+    }
+
+    this.recentRms.push(rms);
+    if (this.recentRms.length > ATTACK_WINDOW) this.recentRms.shift();
+  }
+
+  _tickFlux(rms, now) {
+    const rawFlux = this._computeFlux(this.freqBuffer);
+
+    this.fluxRecent.push(rawFlux);
+    if (this.fluxRecent.length > FLUX_SMOOTH_FRAMES) this.fluxRecent.shift();
+    const smoothedFlux = this.fluxRecent.reduce((a, b) => a + b, 0) / this.fluxRecent.length;
+
+    const historyOrBaseline = this.fluxHistory.length >= 2 ? this.fluxHistory : null;
+    const windowMean = historyOrBaseline
+      ? historyOrBaseline.reduce((a, b) => a + b, 0) / historyOrBaseline.length
+      : this.fluxBaseline?.mean ?? 0;
+    const windowVariance = historyOrBaseline
+      ? historyOrBaseline.reduce((a, b) => a + (b - windowMean) ** 2, 0) / historyOrBaseline.length
+      : (this.fluxBaseline?.stddev ?? 0) ** 2;
+    const windowStddev = Math.sqrt(windowVariance);
+
+    this.fluxFloorSmoothed = Math.max(this.fluxFloorSmoothed * this.fluxFloorDecayFactor, windowMean);
+    const absFloor =
+      (this.fluxBaseline?.mean ?? 0) + this.fluxAbsFloorMultiplier * (this.fluxBaseline?.stddev ?? 0);
+    const fluxThreshold = Math.max(
+      absFloor,
+      this.fluxFloorSmoothed + sensitivityToFluxK(this.sensitivity) * windowStddev
+    );
+
+    this.fluxHistory.push(smoothedFlux);
+    if (this.fluxHistory.length > this.fluxWindowFrames) this.fluxHistory.shift();
+
+    this.fluxFrames.push({ flux: smoothedFlux, threshold: fluxThreshold, timestamp: now });
+    if (this.fluxFrames.length > 3) this.fluxFrames.shift();
+
+    this.dispatchEvent(
+      new CustomEvent("level", {
+        detail: {
+          mode: "flux",
+          rms,
+          flux: smoothedFlux,
+          fluxThreshold,
+          fluxFloor: this.fluxFloorSmoothed,
+          windowStddev,
+        },
+      })
+    );
+
+    if (this.fluxFrames.length === 3) {
+      const [prev2, prev1, current] = this.fluxFrames;
+      const isLocalMax = prev2.flux <= prev1.flux && prev1.flux >= current.flux;
+      const exceedsThreshold = prev1.flux > prev1.threshold * (1 + this.fluxPeakMarginFactor);
+      const refractoryElapsed = prev1.timestamp - this.lastHitTime > this.refractoryMs;
+
+      if (isLocalMax && exceedsThreshold && refractoryElapsed) {
+        this.lastHitTime = prev1.timestamp;
+        this.dispatchEvent(
+          new CustomEvent("hit", { detail: { timestamp: prev1.timestamp, rms, flux: prev1.flux } })
+        );
+      }
+    }
+  }
+
   startCounting() {
     this.state = "BELOW";
     this.lastHitTime = 0;
@@ -196,58 +383,13 @@ export class AudioEngine extends EventTarget {
     const tick = () => {
       const rms = this._readRms();
       this.analyser.getByteFrequencyData(this.freqBuffer);
-      const hfcRatio = computeHfcRatio(this.freqBuffer);
-
-      const shortTermAvg =
-        this.recentRms.length > 0
-          ? this.recentRms.reduce((a, b) => a + b, 0) / this.recentRms.length
-          : rms;
-
       const now = performance.now();
-      const aboveThreshold = rms > this.threshold;
-      const belowRearm = rms < this.threshold * this.hysteresisFactor;
 
-      const attackDelta = rms - shortTermAvg;
-      const requiredDelta =
-        (this.threshold - (this.baselineEma ?? this.baseline?.mean ?? 0)) * ATTACK_DELTA_FACTOR;
-
-      this.dispatchEvent(
-        new CustomEvent("level", {
-          detail: {
-            rms,
-            threshold: this.threshold,
-            hysteresisThreshold: this.threshold * this.hysteresisFactor,
-            hfcRatio,
-            attackDelta,
-            requiredDelta,
-            state: this.state,
-          },
-        })
-      );
-
-      if (this.state === "BELOW" && aboveThreshold && now - this.lastHitTime > this.refractoryMs) {
-        const hasSharpAttack = attackDelta >= requiredDelta;
-        const isPercussive = hfcRatio >= HFC_MIN_RATIO;
-
-        if (hasSharpAttack && isPercussive) {
-          this.lastHitTime = now;
-          this.state = "ABOVE";
-          this.dispatchEvent(new CustomEvent("hit", { detail: { timestamp: now, rms, hfcRatio } }));
-        }
-      } else if (this.state === "ABOVE" && belowRearm) {
-        this.state = "BELOW";
+      if (this.detectionMode === "flux") {
+        this._tickFlux(rms, now);
+      } else {
+        this._tickLegacy(rms, now);
       }
-
-      // slow-following baseline drift, only while quiet, so it never absorbs jump peaks
-      if (this.state === "BELOW" && this.baselineEma != null) {
-        const dt = 16; // approx ms per rAF tick, good enough for this slow EMA
-        const alpha = dt / (BASELINE_EMA_TAU_MS + dt);
-        this.baselineEma = this.baselineEma + alpha * (rms - this.baselineEma);
-        this._recomputeThreshold();
-      }
-
-      this.recentRms.push(rms);
-      if (this.recentRms.length > ATTACK_WINDOW) this.recentRms.shift();
 
       this.rafId = requestAnimationFrame(tick);
     };

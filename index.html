@@ -16,8 +16,18 @@
 
 <div id="debug-panel" data-role="debug-panel" hidden>
   <div class="debug-controls">
+    <label>algo
+      <select data-role="debug-mode-select">
+        <option value="legacy">legacy (RMS)</option>
+        <option value="flux">flux (onset)</option>
+      </select>
+    </label>
     <label>refractory (ms) <input type="text" inputmode="numeric" data-role="debug-refractory-input" /></label>
     <label>hystérésis (0-1) <input type="text" inputmode="decimal" data-role="debug-hysteresis-input" /></label>
+    <label>flux fenêtre (frames) <input type="text" inputmode="numeric" data-role="debug-flux-window-input" /></label>
+    <label>flux décroissance plancher <input type="text" inputmode="decimal" data-role="debug-flux-decay-input" /></label>
+    <label>flux plancher (×σ calib) <input type="text" inputmode="decimal" data-role="debug-flux-floor-input" /></label>
+    <label>flux marge pic <input type="text" inputmode="decimal" data-role="debug-flux-margin-input" /></label>
   </div>
   <pre data-role="debug-text"></pre>
 </div>

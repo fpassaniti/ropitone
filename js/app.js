@@ -1,4 +1,14 @@
-import { AudioEngine, sensitivityToK, sensitivityToGain, REFRACTORY_MS, HYSTERESIS_FACTOR } from "./audio.js";
+import {
+  AudioEngine,
+  sensitivityToK,
+  sensitivityToGain,
+  REFRACTORY_MS,
+  HYSTERESIS_FACTOR,
+  FLUX_WINDOW_FRAMES,
+  FLUX_FLOOR_DECAY_FACTOR,
+  FLUX_ABS_FLOOR_STDDEV_MULT,
+  FLUX_PEAK_MARGIN_FACTOR,
+} from "./audio.js";
 import { WakeLockController } from "./wakelock.js";
 import * as ui from "./ui.js";
 import * as storage from "./storage.js";
@@ -12,6 +22,11 @@ const debugPanel = document.querySelector('[data-role="debug-panel"]');
 const debugText = document.querySelector('[data-role="debug-text"]');
 const debugRefractoryInput = document.querySelector('[data-role="debug-refractory-input"]');
 const debugHysteresisInput = document.querySelector('[data-role="debug-hysteresis-input"]');
+const debugModeSelect = document.querySelector('[data-role="debug-mode-select"]');
+const debugFluxWindowInput = document.querySelector('[data-role="debug-flux-window-input"]');
+const debugFluxDecayInput = document.querySelector('[data-role="debug-flux-decay-input"]');
+const debugFluxFloorInput = document.querySelector('[data-role="debug-flux-floor-input"]');
+const debugFluxMarginInput = document.querySelector('[data-role="debug-flux-margin-input"]');
 
 let audioEngine = null;
 let sessionStartTime = 0;
@@ -21,6 +36,11 @@ let currentSensitivity = 6;
 let lastHitTimestamp = null;
 let debugRefractoryMs = REFRACTORY_MS;
 let debugHysteresisFactor = HYSTERESIS_FACTOR;
+let debugDetectionMode = "legacy";
+let debugFluxWindowFrames = FLUX_WINDOW_FRAMES;
+let debugFluxDecayFactor = FLUX_FLOOR_DECAY_FACTOR;
+let debugFluxAbsFloorMult = FLUX_ABS_FLOOR_STDDEV_MULT;
+let debugFluxPeakMargin = FLUX_PEAK_MARGIN_FACTOR;
 
 function init() {
   if (debugEnabled) {
@@ -39,6 +59,45 @@ function init() {
       if (Number.isFinite(value) && value >= 0) {
         debugHysteresisFactor = value;
         audioEngine?.setHysteresisFactor(value);
+      }
+    });
+
+    debugModeSelect.value = debugDetectionMode;
+    debugFluxWindowInput.value = String(debugFluxWindowFrames);
+    debugFluxDecayInput.value = String(debugFluxDecayFactor);
+    debugFluxFloorInput.value = String(debugFluxAbsFloorMult);
+    debugFluxMarginInput.value = String(debugFluxPeakMargin);
+
+    debugModeSelect.addEventListener("change", () => {
+      debugDetectionMode = debugModeSelect.value;
+      audioEngine?.setDetectionMode(debugDetectionMode);
+    });
+    debugFluxWindowInput.addEventListener("input", () => {
+      const value = Number(debugFluxWindowInput.value);
+      if (Number.isFinite(value) && value >= 1) {
+        debugFluxWindowFrames = value;
+        audioEngine?.setFluxWindowFrames(value);
+      }
+    });
+    debugFluxDecayInput.addEventListener("input", () => {
+      const value = Number(debugFluxDecayInput.value);
+      if (Number.isFinite(value) && value >= 0 && value <= 1) {
+        debugFluxDecayFactor = value;
+        audioEngine?.setFluxFloorDecayFactor(value);
+      }
+    });
+    debugFluxFloorInput.addEventListener("input", () => {
+      const value = Number(debugFluxFloorInput.value);
+      if (Number.isFinite(value) && value >= 0) {
+        debugFluxAbsFloorMult = value;
+        audioEngine?.setFluxAbsFloorMultiplier(value);
+      }
+    });
+    debugFluxMarginInput.addEventListener("input", () => {
+      const value = Number(debugFluxMarginInput.value);
+      if (Number.isFinite(value) && value >= 0) {
+        debugFluxPeakMargin = value;
+        audioEngine?.setFluxPeakMarginFactor(value);
       }
     });
   }
@@ -71,6 +130,11 @@ async function handleStart() {
   if (debugEnabled) {
     audioEngine.setRefractoryMs(debugRefractoryMs);
     audioEngine.setHysteresisFactor(debugHysteresisFactor);
+    audioEngine.setFluxWindowFrames(debugFluxWindowFrames);
+    audioEngine.setFluxFloorDecayFactor(debugFluxDecayFactor);
+    audioEngine.setFluxAbsFloorMultiplier(debugFluxAbsFloorMult);
+    audioEngine.setFluxPeakMarginFactor(debugFluxPeakMargin);
+    audioEngine.setDetectionMode(debugDetectionMode);
   }
 
   try {
@@ -148,15 +212,28 @@ function onHit(e) {
 }
 
 function onLevel(e) {
-  const ratio = e.detail.threshold > 0 ? e.detail.rms / e.detail.threshold : 0;
+  const ratio =
+    e.detail.mode === "flux"
+      ? e.detail.fluxThreshold > 0 ? e.detail.flux / e.detail.fluxThreshold : 0
+      : e.detail.threshold > 0 ? e.detail.rms / e.detail.threshold : 0;
   ui.setMicLevel(ratio);
   if (debugEnabled) renderDebugPanel(e.detail);
 }
 
 function renderDebugPanel(d) {
   const interval = lastHitTimestamp != null ? Math.round(performance.now() - lastHitTimestamp) : "-";
+  const header = `sensibilité: ${currentSensitivity} (k=${sensitivityToK(currentSensitivity).toFixed(2)}, gain=${sensitivityToGain(currentSensitivity).toFixed(2)}x)  algo: ${d.mode}\n`;
+
+  if (d.mode === "flux") {
+    debugText.textContent =
+      header +
+      `flux: ${d.flux.toFixed(2)}  seuil: ${d.fluxThreshold.toFixed(2)}  plancher: ${d.fluxFloor.toFixed(2)}  écart-type: ${d.windowStddev.toFixed(2)}\n` +
+      `dernier hit il y a: ${interval}ms  total: ${hitCount}`;
+    return;
+  }
+
   debugText.textContent =
-    `sensibilité: ${currentSensitivity} (k=${sensitivityToK(currentSensitivity).toFixed(2)}, gain=${sensitivityToGain(currentSensitivity).toFixed(2)}x)\n` +
+    header +
     `rms: ${d.rms.toFixed(4)}  seuil: ${d.threshold.toFixed(4)}  hystérésis: ${d.hysteresisThreshold.toFixed(4)}\n` +
     `état: ${d.state}  hfc: ${d.hfcRatio.toFixed(2)}  attaque: ${d.attackDelta.toFixed(4)}/${d.requiredDelta.toFixed(4)}\n` +
     `dernier hit il y a: ${interval}ms  total: ${hitCount}`;
