@@ -78,7 +78,7 @@ export class AudioEngine extends EventTarget {
     this.state = "BELOW";
     this.lastHitTime = 0;
     this.recentRms = [];
-    this.detectionMode = "legacy"; // "legacy" | "flux"
+    this.detectionMode = "flux"; // "legacy" | "flux" — flux is the default; legacy stays available via debug
     this.prevFreqBuffer = null;
     this.fluxBaseline = null; // { mean, stddev }
     this.fluxHistory = [];
