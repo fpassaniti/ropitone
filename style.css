@@ -291,3 +291,19 @@ h2 { font-size: 1.4rem; margin: 0; }
 .debug-controls select {
   width: auto;
 }
+.debug-controls [data-role="debug-legacy-fields"],
+.debug-controls [data-role="debug-flux-fields"] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.debug-controls [data-role="debug-legacy-fields"][hidden],
+.debug-controls [data-role="debug-flux-fields"][hidden] {
+  display: none;
+}
+.debug-hint {
+  margin: 0;
+  font-size: 0.6rem;
+  color: rgba(125, 255, 176, 0.6);
+  max-width: 14rem;
+}

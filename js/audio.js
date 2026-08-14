@@ -3,7 +3,7 @@
 
 export const REFRACTORY_MS = 250; // hard floor on inter-hit spacing (~240 jumps/min ceiling)
 export const HYSTERESIS_FACTOR = 0.65; // must fall below threshold*this before re-arming
-const MIN_ABS_THRESHOLD = 0.006; // guards near-silent rooms where stddev ~= 0
+const MIN_ABS_THRESHOLD = 0.004; // guards near-silent rooms where stddev ~= 0
 const MAX_THRESHOLD = 0.9;
 const ATTACK_WINDOW = 8; // frames of short-term average used for the attack/derivative guard
 const ATTACK_DELTA_FACTOR = 0.25; // required jump above short-term average, as a fraction of (threshold - baseline)
@@ -39,7 +39,7 @@ function computeHfcRatio(freqData) {
 }
 
 const K_AT_MIN_SENSITIVITY = 10; // slider 1
-const K_AT_MAX_SENSITIVITY = 1.5; // slider 10
+const K_AT_MAX_SENSITIVITY = 1.1; // slider 10
 
 export function sensitivityToK(sensitivity) {
   const t = (sensitivity - 1) / 9; // 0 at slider=1, 1 at slider=10
@@ -47,7 +47,7 @@ export function sensitivityToK(sensitivity) {
 }
 
 const GAIN_AT_MIN_SENSITIVITY = 1; // slider 1 — no boost
-const GAIN_AT_MAX_SENSITIVITY = 6; // slider 10 — starting point, tune on real device
+const GAIN_AT_MAX_SENSITIVITY = 8; // slider 10 — starting point, tune on real device
 
 export function sensitivityToGain(sensitivity) {
   const t = (sensitivity - 1) / 9; // 0 at slider=1, 1 at slider=10
@@ -318,6 +318,7 @@ export class AudioEngine extends EventTarget {
   }
 
   _tickFlux(rms, now) {
+    const hfcRatio = computeHfcRatio(this.freqBuffer);
     const rawFlux = this._computeFlux(this.freqBuffer);
 
     this.fluxRecent.push(rawFlux);
@@ -341,10 +342,17 @@ export class AudioEngine extends EventTarget {
       this.fluxFloorSmoothed + sensitivityToFluxK(this.sensitivity) * windowStddev
     );
 
-    this.fluxHistory.push(smoothedFlux);
-    if (this.fluxHistory.length > this.fluxWindowFrames) this.fluxHistory.shift();
+    // Only feed the adaptive window with quiet frames, mirroring legacy's
+    // baselineEma-while-BELOW rule — otherwise a jump's own flux spike gets
+    // folded into the "noise floor" and the threshold ratchets up during
+    // continuous jumping.
+    const isQuiet = smoothedFlux <= fluxThreshold;
+    if (isQuiet) {
+      this.fluxHistory.push(smoothedFlux);
+      if (this.fluxHistory.length > this.fluxWindowFrames) this.fluxHistory.shift();
+    }
 
-    this.fluxFrames.push({ flux: smoothedFlux, threshold: fluxThreshold, timestamp: now });
+    this.fluxFrames.push({ flux: smoothedFlux, threshold: fluxThreshold, timestamp: now, hfcRatio });
     if (this.fluxFrames.length > 3) this.fluxFrames.shift();
 
     this.dispatchEvent(
@@ -365,8 +373,9 @@ export class AudioEngine extends EventTarget {
       const isLocalMax = prev2.flux <= prev1.flux && prev1.flux >= current.flux;
       const exceedsThreshold = prev1.flux > prev1.threshold * (1 + this.fluxPeakMarginFactor);
       const refractoryElapsed = prev1.timestamp - this.lastHitTime > this.refractoryMs;
+      const isPercussive = prev1.hfcRatio >= HFC_MIN_RATIO;
 
-      if (isLocalMax && exceedsThreshold && refractoryElapsed) {
+      if (isLocalMax && exceedsThreshold && refractoryElapsed && isPercussive) {
         this.lastHitTime = prev1.timestamp;
         this.dispatchEvent(
           new CustomEvent("hit", { detail: { timestamp: prev1.timestamp, rms, flux: prev1.flux } })

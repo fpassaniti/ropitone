@@ -23,11 +23,20 @@
       </select>
     </label>
     <label>refractory (ms) <input type="text" inputmode="numeric" data-role="debug-refractory-input" /></label>
-    <label>hystérésis (0-1) <input type="text" inputmode="decimal" data-role="debug-hysteresis-input" /></label>
-    <label>flux fenêtre (frames) <input type="text" inputmode="numeric" data-role="debug-flux-window-input" /></label>
-    <label>flux décroissance plancher <input type="text" inputmode="decimal" data-role="debug-flux-decay-input" /></label>
-    <label>flux plancher (×σ calib) <input type="text" inputmode="decimal" data-role="debug-flux-floor-input" /></label>
-    <label>flux marge pic <input type="text" inputmode="decimal" data-role="debug-flux-margin-input" /></label>
+    <div data-role="debug-legacy-fields">
+      <label>hystérésis (0-1) <input type="text" inputmode="decimal" data-role="debug-hysteresis-input" /></label>
+      <p class="debug-hint">Fraction du seuil sous laquelle le niveau doit redescendre avant qu'un nouveau saut puisse être compté.</p>
+    </div>
+    <div data-role="debug-flux-fields">
+      <label>flux fenêtre (frames) <input type="text" inputmode="numeric" data-role="debug-flux-window-input" /></label>
+      <p class="debug-hint">Nombre de frames utilisées pour calculer le seuil adaptatif (~30 = 0,5s). Plus grand = plus lent à s'adapter.</p>
+      <label>flux décroissance plancher <input type="text" inputmode="decimal" data-role="debug-flux-decay-input" /></label>
+      <p class="debug-hint">Vitesse de redescente du seuil après un pic. Proche de 1 = redescend lentement.</p>
+      <label>flux plancher (×σ calib) <input type="text" inputmode="decimal" data-role="debug-flux-floor-input" /></label>
+      <p class="debug-hint">Seuil minimum absolu, en multiples de l'écart-type mesuré à la calibration.</p>
+      <label>flux marge pic <input type="text" inputmode="decimal" data-role="debug-flux-margin-input" /></label>
+      <p class="debug-hint">Marge exigée au-dessus du seuil pour valider un pic, ex. 0.1 = +10%.</p>
+    </div>
   </div>
   <pre data-role="debug-text"></pre>
 </div>

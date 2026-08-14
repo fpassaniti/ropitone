@@ -23,6 +23,8 @@ const debugText = document.querySelector('[data-role="debug-text"]');
 const debugRefractoryInput = document.querySelector('[data-role="debug-refractory-input"]');
 const debugHysteresisInput = document.querySelector('[data-role="debug-hysteresis-input"]');
 const debugModeSelect = document.querySelector('[data-role="debug-mode-select"]');
+const debugLegacyFields = document.querySelector('[data-role="debug-legacy-fields"]');
+const debugFluxFields = document.querySelector('[data-role="debug-flux-fields"]');
 const debugFluxWindowInput = document.querySelector('[data-role="debug-flux-window-input"]');
 const debugFluxDecayInput = document.querySelector('[data-role="debug-flux-decay-input"]');
 const debugFluxFloorInput = document.querySelector('[data-role="debug-flux-floor-input"]');
@@ -41,6 +43,11 @@ let debugFluxWindowFrames = FLUX_WINDOW_FRAMES;
 let debugFluxDecayFactor = FLUX_FLOOR_DECAY_FACTOR;
 let debugFluxAbsFloorMult = FLUX_ABS_FLOOR_STDDEV_MULT;
 let debugFluxPeakMargin = FLUX_PEAK_MARGIN_FACTOR;
+
+function updateDebugFieldVisibility() {
+  debugLegacyFields.hidden = debugDetectionMode === "flux";
+  debugFluxFields.hidden = debugDetectionMode !== "flux";
+}
 
 function init() {
   if (debugEnabled) {
@@ -67,10 +74,12 @@ function init() {
     debugFluxDecayInput.value = String(debugFluxDecayFactor);
     debugFluxFloorInput.value = String(debugFluxAbsFloorMult);
     debugFluxMarginInput.value = String(debugFluxPeakMargin);
+    updateDebugFieldVisibility();
 
     debugModeSelect.addEventListener("change", () => {
       debugDetectionMode = debugModeSelect.value;
       audioEngine?.setDetectionMode(debugDetectionMode);
+      updateDebugFieldVisibility();
     });
     debugFluxWindowInput.addEventListener("input", () => {
       const value = Number(debugFluxWindowInput.value);
