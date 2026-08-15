@@ -2,7 +2,7 @@ const SESSIONS_KEY = "ropitone:v1:sessions";
 const SETTINGS_KEY = "ropitone:v1:settings";
 const STATS_KEY = "ropitone:v1:stats";
 const MAX_SESSIONS = 200;
-const DEFAULT_SETTINGS = { sensitivity: 6 };
+const DEFAULT_SETTINGS = { sensitivity: 6, algoMode: "flux" };
 const DEFAULT_STATS = { allTimeTotal: 0, tripTotal: 0, tripStartDate: null };
 
 function readJson(key, fallback) {

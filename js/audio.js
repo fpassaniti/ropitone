@@ -19,6 +19,11 @@ export const FLUX_PEAK_MARGIN_FACTOR = 0.1; // required margin above threshold, 
 const K_AT_MIN_SENSITIVITY_FLUX = 4; // slider 1
 const K_AT_MAX_SENSITIVITY_FLUX = 1.5; // slider 10
 
+// Flux v2 (prominence + re-arm hysteresis on top of the flux algorithm, toggled via the debug panel)
+export const FLUX_PROMINENCE_FACTOR = 0.6; // minimum prominence required, as a fraction of the current fluxThreshold
+export const FLUX_REARM_FACTOR = 0.55; // must fall below fluxThreshold*this to re-arm
+const FLUX_REARM_TIMEOUT_MS = 1200; // anti-livelock safety net: force re-arm if stuck longer than this
+
 function computeRms(timeDomainData) {
   let sumSquares = 0;
   for (let i = 0; i < timeDomainData.length; i++) {
@@ -78,7 +83,7 @@ export class AudioEngine extends EventTarget {
     this.state = "BELOW";
     this.lastHitTime = 0;
     this.recentRms = [];
-    this.detectionMode = "flux"; // "legacy" | "flux" — flux is the default; legacy stays available via debug
+    this.detectionMode = "flux"; // "legacy" | "flux" | "flux-v2" — flux is the default
     this.prevFreqBuffer = null;
     this.fluxBaseline = null; // { mean, stddev }
     this.fluxHistory = [];
@@ -89,6 +94,12 @@ export class AudioEngine extends EventTarget {
     this.fluxFloorDecayFactor = FLUX_FLOOR_DECAY_FACTOR;
     this.fluxAbsFloorMultiplier = FLUX_ABS_FLOOR_STDDEV_MULT;
     this.fluxPeakMarginFactor = FLUX_PEAK_MARGIN_FACTOR;
+    this.fluxProminenceFactor = FLUX_PROMINENCE_FACTOR;
+    this.fluxRearmFactor = FLUX_REARM_FACTOR;
+    this.fluxArmed = true;
+    this.fluxValleySinceHit = Infinity; // min(smoothedFlux) observed since the last confirmed hit (flux-v2 only)
+    this.clockNode = null;
+    this.silentGain = null;
     this._onVisibilityChange = this._onVisibilityChange.bind(this);
   }
 
@@ -123,7 +134,47 @@ export class AudioEngine extends EventTarget {
     this.freqBuffer = new Uint8Array(this.analyser.frequencyBinCount);
     this.prevFreqBuffer = new Uint8Array(this.analyser.frequencyBinCount);
 
+    // Drive frame timing off the audio render thread rather than requestAnimationFrame,
+    // which browsers throttle/pause in background tabs or under rendering jank —
+    // exactly when a transient jump peak is most likely to be silently dropped.
+    if (this.audioContext.audioWorklet) {
+      try {
+        // Worklet.addModule() resolves relative URLs against the document's base URI,
+        // not this module's URL, so the path must be given relative to index.html.
+        await this.audioContext.audioWorklet.addModule("./js/audio-clock-processor.js");
+        this.clockNode = new AudioWorkletNode(this.audioContext, "audio-clock-processor");
+        this.gainNode.connect(this.clockNode);
+        this.silentGain = this.audioContext.createGain();
+        this.silentGain.gain.value = 0;
+        this.clockNode.connect(this.silentGain);
+        this.silentGain.connect(this.audioContext.destination);
+      } catch {
+        this.clockNode = null;
+        this.silentGain = null;
+      }
+    }
+
     document.addEventListener("visibilitychange", this._onVisibilityChange);
+  }
+
+  _startClock(onTick) {
+    if (this.clockNode) {
+      this.clockNode.port.onmessage = () => onTick(performance.now());
+    } else {
+      const loop = () => {
+        onTick(performance.now());
+        this.rafId = requestAnimationFrame(loop);
+      };
+      this.rafId = requestAnimationFrame(loop);
+    }
+  }
+
+  _stopClock() {
+    if (this.clockNode) this.clockNode.port.onmessage = null;
+    if (this.rafId != null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
   }
 
   async _onVisibilityChange() {
@@ -166,9 +217,9 @@ export class AudioEngine extends EventTarget {
         const progress = Math.min(1, elapsed / durationMs);
         this.dispatchEvent(new CustomEvent("calibration-progress", { detail: { progress } }));
 
-        if (elapsed < durationMs) {
-          this.rafId = requestAnimationFrame(tick);
-        } else {
+        if (elapsed >= durationMs) {
+          this._stopClock();
+
           const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
           const variance = samples.reduce((a, b) => a + (b - mean) ** 2, 0) / samples.length;
           const stddev = Math.sqrt(variance);
@@ -189,7 +240,7 @@ export class AudioEngine extends EventTarget {
         }
       };
 
-      this.rafId = requestAnimationFrame(tick);
+      this._startClock(tick);
     });
   }
 
@@ -244,6 +295,8 @@ export class AudioEngine extends EventTarget {
     this.fluxFrames = [];
     this.fluxHistory = [];
     this.fluxFloorSmoothed = this.fluxBaseline?.mean ?? 0;
+    this.fluxArmed = true;
+    this.fluxValleySinceHit = Infinity;
   }
 
   setFluxWindowFrames(n) {
@@ -256,6 +309,14 @@ export class AudioEngine extends EventTarget {
 
   setFluxAbsFloorMultiplier(m) {
     this.fluxAbsFloorMultiplier = m;
+  }
+
+  setFluxProminenceFactor(f) {
+    this.fluxProminenceFactor = f;
+  }
+
+  setFluxRearmFactor(f) {
+    this.fluxRearmFactor = f;
   }
 
   setFluxPeakMarginFactor(f) {
@@ -384,38 +445,134 @@ export class AudioEngine extends EventTarget {
     }
   }
 
+  // Same onset detection as _tickFlux, plus two additive shape-based checks:
+  // a minimum prominence (how sharply the flux rose out of the preceding valley,
+  // rather than just crossing an absolute threshold) and a low re-arm hysteresis
+  // (must fall back below a lower threshold before a new hit can be confirmed,
+  // which also stops reverb tails from leaking into the adaptive noise floor).
+  _tickFluxV2(rms, now) {
+    const hfcRatio = computeHfcRatio(this.freqBuffer);
+    const rawFlux = this._computeFlux(this.freqBuffer);
+
+    this.fluxRecent.push(rawFlux);
+    if (this.fluxRecent.length > FLUX_SMOOTH_FRAMES) this.fluxRecent.shift();
+    const smoothedFlux = this.fluxRecent.reduce((a, b) => a + b, 0) / this.fluxRecent.length;
+
+    if (smoothedFlux < this.fluxValleySinceHit) this.fluxValleySinceHit = smoothedFlux;
+
+    const historyOrBaseline = this.fluxHistory.length >= 2 ? this.fluxHistory : null;
+    const windowMean = historyOrBaseline
+      ? historyOrBaseline.reduce((a, b) => a + b, 0) / historyOrBaseline.length
+      : this.fluxBaseline?.mean ?? 0;
+    const windowVariance = historyOrBaseline
+      ? historyOrBaseline.reduce((a, b) => a + (b - windowMean) ** 2, 0) / historyOrBaseline.length
+      : (this.fluxBaseline?.stddev ?? 0) ** 2;
+    const windowStddev = Math.sqrt(windowVariance);
+
+    this.fluxFloorSmoothed = Math.max(this.fluxFloorSmoothed * this.fluxFloorDecayFactor, windowMean);
+    const absFloor =
+      (this.fluxBaseline?.mean ?? 0) + this.fluxAbsFloorMultiplier * (this.fluxBaseline?.stddev ?? 0);
+    const fluxThreshold = Math.max(
+      absFloor,
+      this.fluxFloorSmoothed + sensitivityToFluxK(this.sensitivity) * windowStddev
+    );
+
+    const fluxRearmThreshold = fluxThreshold * this.fluxRearmFactor;
+    if (!this.fluxArmed) {
+      if (smoothedFlux < fluxRearmThreshold || now - this.lastHitTime > FLUX_REARM_TIMEOUT_MS) {
+        this.fluxArmed = true;
+      }
+    }
+
+    // Only feed the adaptive window with frames that are both quiet AND re-armed,
+    // so a jump's reverb tail (still under the current threshold but above the
+    // real noise floor) can't ratchet the threshold up and suppress the next jump.
+    const isQuiet = smoothedFlux <= fluxThreshold && this.fluxArmed;
+    if (isQuiet) {
+      this.fluxHistory.push(smoothedFlux);
+      if (this.fluxHistory.length > this.fluxWindowFrames) this.fluxHistory.shift();
+    }
+
+    this.fluxFrames.push({ flux: smoothedFlux, threshold: fluxThreshold, timestamp: now, hfcRatio });
+    if (this.fluxFrames.length > 3) this.fluxFrames.shift();
+
+    this.dispatchEvent(
+      new CustomEvent("level", {
+        detail: {
+          mode: "flux-v2",
+          rms,
+          flux: smoothedFlux,
+          fluxThreshold,
+          fluxFloor: this.fluxFloorSmoothed,
+          windowStddev,
+          fluxValleySinceHit: this.fluxValleySinceHit,
+          fluxRearmThreshold,
+          fluxArmed: this.fluxArmed,
+        },
+      })
+    );
+
+    if (this.fluxFrames.length === 3) {
+      const [prev2, prev1, current] = this.fluxFrames;
+      const isLocalMax = prev2.flux <= prev1.flux && prev1.flux >= current.flux;
+      const exceedsThreshold = prev1.flux > prev1.threshold * (1 + this.fluxPeakMarginFactor);
+      const refractoryElapsed = prev1.timestamp - this.lastHitTime > this.refractoryMs;
+      const isPercussive = prev1.hfcRatio >= HFC_MIN_RATIO;
+      const prominence = prev1.flux - this.fluxValleySinceHit;
+      const hasProminence = prominence >= prev1.threshold * this.fluxProminenceFactor;
+
+      if (
+        isLocalMax &&
+        exceedsThreshold &&
+        refractoryElapsed &&
+        isPercussive &&
+        hasProminence &&
+        this.fluxArmed
+      ) {
+        this.lastHitTime = prev1.timestamp;
+        this.fluxValleySinceHit = Infinity;
+        this.fluxArmed = false;
+        this.dispatchEvent(
+          new CustomEvent("hit", {
+            detail: { timestamp: prev1.timestamp, rms, flux: prev1.flux, prominence },
+          })
+        );
+      }
+    }
+  }
+
   startCounting() {
     this.state = "BELOW";
     this.lastHitTime = 0;
     this.recentRms = [];
 
-    const tick = () => {
+    const tick = (now) => {
       const rms = this._readRms();
       this.analyser.getByteFrequencyData(this.freqBuffer);
-      const now = performance.now();
 
-      if (this.detectionMode === "flux") {
+      if (this.detectionMode === "flux-v2") {
+        this._tickFluxV2(rms, now);
+      } else if (this.detectionMode === "flux") {
         this._tickFlux(rms, now);
       } else {
         this._tickLegacy(rms, now);
       }
-
-      this.rafId = requestAnimationFrame(tick);
     };
 
-    this.rafId = requestAnimationFrame(tick);
+    this._startClock(tick);
   }
 
   stopCounting() {
-    if (this.rafId != null) {
-      cancelAnimationFrame(this.rafId);
-      this.rafId = null;
-    }
+    this._stopClock();
   }
 
   stop() {
     this.stopCounting();
     document.removeEventListener("visibilitychange", this._onVisibilityChange);
+    this.clockNode?.disconnect();
+    this.silentGain?.disconnect();
+    this.clockNode = null;
+    this.silentGain = null;
     this.stream?.getTracks().forEach((track) => track.stop());
     this.audioContext?.close();
     this.stream = null;

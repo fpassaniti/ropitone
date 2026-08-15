@@ -19,6 +19,7 @@
     <label>algo
       <select data-role="debug-mode-select">
         <option value="flux">flux (onset) — défaut</option>
+        <option value="flux-v2">flux v2 (prominence)</option>
         <option value="legacy">legacy (RMS) — fallback</option>
       </select>
     </label>
@@ -36,6 +37,12 @@
       <p class="debug-hint">Seuil minimum absolu, en multiples de l'écart-type mesuré à la calibration.</p>
       <label>flux marge pic <input type="text" inputmode="decimal" data-role="debug-flux-margin-input" /></label>
       <p class="debug-hint">Marge exigée au-dessus du seuil pour valider un pic, ex. 0.1 = +10%.</p>
+    </div>
+    <div data-role="debug-flux-v2-fields">
+      <label>flux v2 prominence <input type="text" inputmode="decimal" data-role="debug-flux-prominence-input" /></label>
+      <p class="debug-hint">Netteté minimale exigée entre la vallée précédente et le pic, en fraction du seuil.</p>
+      <label>flux v2 réarmement (0-1) <input type="text" inputmode="decimal" data-role="debug-flux-rearm-input" /></label>
+      <p class="debug-hint">Fraction du seuil sous laquelle le flux doit redescendre avant qu'un nouveau saut puisse être compté.</p>
     </div>
   </div>
   <pre data-role="debug-text"></pre>
@@ -56,6 +63,16 @@
     <label class="sensitivity">
       <span>Sensibilité</span>
       <input type="range" min="1" max="10" step="1" value="6" data-role="sensitivity-slider" />
+    </label>
+
+    <label class="algo-toggle">
+      <span>Algorithme de détection</span>
+      <input type="range" min="0" max="2" step="1" value="1" data-role="algo-slider" />
+      <div class="algo-toggle-labels">
+        <span>Legacy</span>
+        <span>Actuel</span>
+        <span>V2</span>
+      </div>
     </label>
 
     <button class="btn btn-primary" data-action="start">Démarrer une session</button>

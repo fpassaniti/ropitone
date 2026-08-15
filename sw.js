@@ -1,4 +1,4 @@
-const CACHE_NAME = "ropitone-shell-v2";
+const CACHE_NAME = "ropitone-shell-v3";
 const SHELL_FILES = [
   "./",
   "./index.html",
@@ -6,6 +6,7 @@ const SHELL_FILES = [
   "./manifest.json",
   "./js/app.js",
   "./js/audio.js",
+  "./js/audio-clock-processor.js",
   "./js/ui.js",
   "./js/storage.js",
   "./js/wakelock.js",

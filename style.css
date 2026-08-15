@@ -72,6 +72,21 @@ h2 { font-size: 1.4rem; margin: 0; }
 }
 .sensitivity input[type="range"] { width: 100%; }
 
+.algo-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.algo-toggle input[type="range"] { width: 100%; }
+.algo-toggle-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+}
+
 .btn {
   width: 100%;
   padding: 0.9rem 1rem;

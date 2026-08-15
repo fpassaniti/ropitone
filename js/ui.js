@@ -4,6 +4,7 @@ const el = {
   bestScore: document.querySelector('[data-role="best-score"]'),
   sensitivitySlider: document.querySelector('[data-role="sensitivity-slider"]'),
   sensitivitySliderLive: document.querySelector('[data-role="sensitivity-slider-live"]'),
+  algoSlider: document.querySelector('[data-role="algo-slider"]'),
   idleError: document.querySelector('[data-role="idle-error"]'),
   calibrationProgress: document.querySelector('[data-role="calibration-progress"]'),
   countdown: document.querySelector('[data-role="countdown"]'),
@@ -41,6 +42,10 @@ export function init(actions) {
     el.sensitivitySlider.value = value;
     actions.onSensitivityChange?.(value);
   });
+
+  el.algoSlider.addEventListener("input", (e) => {
+    actions.onAlgoModeChange?.(Number(e.target.value));
+  });
 }
 
 function toCamelCase(str) {
@@ -54,6 +59,10 @@ export function setState(state) {
 export function setSensitivityValue(value) {
   el.sensitivitySlider.value = value;
   el.sensitivitySliderLive.value = value;
+}
+
+export function setAlgoModeValue(index) {
+  el.algoSlider.value = index;
 }
 
 export function setBestScore(count) {
