@@ -4,12 +4,16 @@ import {
   sensitivityToGain,
   REFRACTORY_MS,
   HYSTERESIS_FACTOR,
+  HFC_MIN_RATIO,
+  FLUX_SMOOTH_FRAMES,
   FLUX_WINDOW_FRAMES,
   FLUX_FLOOR_DECAY_FACTOR,
   FLUX_ABS_FLOOR_STDDEV_MULT,
+  FLUX_MAX_THRESHOLD_RATIO,
   FLUX_PEAK_MARGIN_FACTOR,
   FLUX_PROMINENCE_FACTOR,
   FLUX_REARM_FACTOR,
+  FLUX_REARM_TIMEOUT_MS,
 } from "./audio.js";
 import { WakeLockController } from "./wakelock.js";
 import * as ui from "./ui.js";
@@ -35,6 +39,13 @@ const debugFluxMarginInput = document.querySelector('[data-role="debug-flux-marg
 const debugFluxV2Fields = document.querySelector('[data-role="debug-flux-v2-fields"]');
 const debugFluxProminenceInput = document.querySelector('[data-role="debug-flux-prominence-input"]');
 const debugFluxRearmInput = document.querySelector('[data-role="debug-flux-rearm-input"]');
+const debugHfcInput = document.querySelector('[data-role="debug-hfc-input"]');
+const debugFluxSmoothInput = document.querySelector('[data-role="debug-flux-smooth-input"]');
+const debugFluxCapInput = document.querySelector('[data-role="debug-flux-cap-input"]');
+const debugFluxRearmTimeoutInput = document.querySelector('[data-role="debug-flux-rearm-timeout-input"]');
+const debugCopyTraceButton = document.querySelector('[data-role="debug-copy-trace"]');
+
+const TRACE_MAX_FRAMES = 640; // ~10s at 62.5fps
 
 let audioEngine = null;
 let sessionStartTime = 0;
@@ -51,6 +62,12 @@ let debugFluxAbsFloorMult = FLUX_ABS_FLOOR_STDDEV_MULT;
 let debugFluxPeakMargin = FLUX_PEAK_MARGIN_FACTOR;
 let debugFluxProminence = FLUX_PROMINENCE_FACTOR;
 let debugFluxRearm = FLUX_REARM_FACTOR;
+let debugHfcMinRatio = HFC_MIN_RATIO;
+let debugFluxSmoothFrames = FLUX_SMOOTH_FRAMES;
+let debugFluxMaxThresholdRatio = FLUX_MAX_THRESHOLD_RATIO;
+let debugFluxRearmTimeoutMs = FLUX_REARM_TIMEOUT_MS;
+let calibrationInfo = null;
+let traceFrames = [];
 
 function updateDebugFieldVisibility() {
   debugLegacyFields.hidden = currentAlgoMode !== "legacy";
@@ -143,6 +160,42 @@ function init() {
         audioEngine?.setFluxRearmFactor(value);
       }
     });
+
+    debugHfcInput.value = String(debugHfcMinRatio);
+    debugFluxSmoothInput.value = String(debugFluxSmoothFrames);
+    debugFluxCapInput.value = String(debugFluxMaxThresholdRatio);
+    debugFluxRearmTimeoutInput.value = String(debugFluxRearmTimeoutMs);
+
+    debugHfcInput.addEventListener("input", () => {
+      const value = Number(debugHfcInput.value);
+      if (Number.isFinite(value) && value >= 0 && value <= 1) {
+        debugHfcMinRatio = value;
+        audioEngine?.setHfcMinRatio(value);
+      }
+    });
+    debugFluxSmoothInput.addEventListener("input", () => {
+      const value = Number(debugFluxSmoothInput.value);
+      if (Number.isFinite(value) && value >= 1) {
+        debugFluxSmoothFrames = value;
+        audioEngine?.setFluxSmoothFrames(value);
+      }
+    });
+    debugFluxCapInput.addEventListener("input", () => {
+      const value = Number(debugFluxCapInput.value);
+      if (Number.isFinite(value) && value >= 0) {
+        debugFluxMaxThresholdRatio = value;
+        audioEngine?.setFluxMaxThresholdRatio(value);
+      }
+    });
+    debugFluxRearmTimeoutInput.addEventListener("input", () => {
+      const value = Number(debugFluxRearmTimeoutInput.value);
+      if (Number.isFinite(value) && value >= 0) {
+        debugFluxRearmTimeoutMs = value;
+        audioEngine?.setFluxRearmTimeoutMs(value);
+      }
+    });
+
+    debugCopyTraceButton.addEventListener("click", () => copyTrace(debugCopyTraceButton));
   }
 
   ui.init({
@@ -187,6 +240,10 @@ async function handleStart() {
     audioEngine.setFluxPeakMarginFactor(debugFluxPeakMargin);
     audioEngine.setFluxProminenceFactor(debugFluxProminence);
     audioEngine.setFluxRearmFactor(debugFluxRearm);
+    audioEngine.setHfcMinRatio(debugHfcMinRatio);
+    audioEngine.setFluxSmoothFrames(debugFluxSmoothFrames);
+    audioEngine.setFluxMaxThresholdRatio(debugFluxMaxThresholdRatio);
+    audioEngine.setFluxRearmTimeoutMs(debugFluxRearmTimeoutMs);
   }
 
   try {
@@ -202,6 +259,9 @@ async function handleStart() {
   ui.setState("calibrating");
   ui.setCalibrationProgress(0);
   audioEngine.addEventListener("calibration-progress", (e) => ui.setCalibrationProgress(e.detail.progress));
+  audioEngine.addEventListener("calibration-done", (e) => {
+    calibrationInfo = e.detail;
+  });
   await audioEngine.calibrate(CALIBRATION_MS);
 
   await runGetReadyCountdown();
@@ -242,6 +302,7 @@ function runGetReadyCountdown() {
 function startCountingSession() {
   hitCount = 0;
   lastHitTimestamp = null;
+  traceFrames = [];
   ui.setCounter(0);
   ui.setTimer(0);
   ui.setPace(0);
@@ -269,7 +330,68 @@ function onLevel(e) {
       ? e.detail.fluxThreshold > 0 ? e.detail.flux / e.detail.fluxThreshold : 0
       : e.detail.threshold > 0 ? e.detail.rms / e.detail.threshold : 0;
   ui.setMicLevel(ratio);
-  if (debugEnabled) renderDebugPanel(e.detail);
+  if (debugEnabled) {
+    recordTraceFrame(e.detail);
+    renderDebugPanel(e.detail);
+  }
+}
+
+function recordTraceFrame(d) {
+  traceFrames.push({
+    t: Math.round(performance.now() - sessionStartTime),
+    flux: d.flux ?? null,
+    threshold: d.fluxThreshold ?? d.threshold,
+    floor: d.fluxFloor ?? null,
+    stddev: d.windowStddev ?? null,
+    hfc: d.hfcRatio,
+    rms: d.rms,
+    valley: d.fluxValleySinceHit === Infinity ? null : d.fluxValleySinceHit ?? null,
+    armed: d.fluxArmed ?? null,
+  });
+  if (traceFrames.length > TRACE_MAX_FRAMES) traceFrames.shift();
+}
+
+async function copyTrace(button) {
+  const payload = JSON.stringify({
+    mode: currentAlgoMode,
+    sensitivity: currentSensitivity,
+    hitCount,
+    calibration: calibrationInfo,
+    settings: {
+      refractoryMs: debugRefractoryMs,
+      hfcMinRatio: debugHfcMinRatio,
+      fluxSmoothFrames: debugFluxSmoothFrames,
+      fluxWindowFrames: debugFluxWindowFrames,
+      fluxDecayFactor: debugFluxDecayFactor,
+      fluxAbsFloorMult: debugFluxAbsFloorMult,
+      fluxMaxThresholdRatio: debugFluxMaxThresholdRatio,
+      fluxPeakMargin: debugFluxPeakMargin,
+      fluxProminence: debugFluxProminence,
+      fluxRearm: debugFluxRearm,
+      fluxRearmTimeoutMs: debugFluxRearmTimeoutMs,
+    },
+    frames: traceFrames,
+  });
+
+  if ("clipboard" in navigator && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(payload);
+      ui.showCopiedFeedback(button);
+    } catch {
+      // écriture presse-papiers refusée/indisponible — rien à afficher
+    }
+  }
+}
+
+function formatRejections(r) {
+  if (!r) return "";
+  return `rejets — seuil ${r.threshold} · hfc ${r.hfc} · réfr ${r.refractory} · prom ${r.prominence} · armé ${r.armed}\n`;
+}
+
+function formatCalibration() {
+  if (!calibrationInfo?.flux) return "";
+  const { mean, stddev, absFloor } = calibrationInfo.flux;
+  return `calib flux — moy ${mean.toFixed(2)}  σ ${stddev.toFixed(2)}  plancher abs ${absFloor.toFixed(2)}\n`;
 }
 
 function renderDebugPanel(d) {
@@ -279,7 +401,10 @@ function renderDebugPanel(d) {
   if (d.mode === "flux") {
     debugText.textContent =
       header +
+      formatCalibration() +
       `flux: ${d.flux.toFixed(2)}  seuil: ${d.fluxThreshold.toFixed(2)}  plancher: ${d.fluxFloor.toFixed(2)}  écart-type: ${d.windowStddev.toFixed(2)}\n` +
+      `bruit: ${d.windowMean.toFixed(2)}  seuil abs: ${d.absFloor.toFixed(2)}  hfc: ${d.hfcRatio.toFixed(2)}\n` +
+      formatRejections(d.gateRejections) +
       `dernier hit il y a: ${interval}ms  total: ${hitCount}`;
     return;
   }
@@ -287,8 +412,11 @@ function renderDebugPanel(d) {
   if (d.mode === "flux-v2") {
     debugText.textContent =
       header +
+      formatCalibration() +
       `flux: ${d.flux.toFixed(2)}  seuil: ${d.fluxThreshold.toFixed(2)}  plancher: ${d.fluxFloor.toFixed(2)}  écart-type: ${d.windowStddev.toFixed(2)}\n` +
-      `vallée: ${d.fluxValleySinceHit === Infinity ? "-" : d.fluxValleySinceHit.toFixed(2)}  réarmement: ${d.fluxRearmThreshold.toFixed(2)}  armé: ${d.fluxArmed}\n` +
+      `bruit: ${d.windowMean.toFixed(2)}  seuil abs: ${d.absFloor.toFixed(2)}  hfc: ${d.hfcRatio.toFixed(2)}\n` +
+      `vallée: ${d.fluxValleySinceHit === Infinity ? "-" : d.fluxValleySinceHit.toFixed(2)}  prominence: ${d.prominence.toFixed(2)}  réarmement: ${d.fluxRearmThreshold.toFixed(2)}  armé: ${d.fluxArmed}\n` +
+      formatRejections(d.gateRejections) +
       `dernier hit il y a: ${interval}ms  total: ${hitCount}`;
     return;
   }

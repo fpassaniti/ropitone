@@ -24,17 +24,23 @@
       </select>
     </label>
     <label>refractory (ms) <input type="text" inputmode="numeric" data-role="debug-refractory-input" /></label>
+    <label>hfc min (0-1) <input type="text" inputmode="decimal" data-role="debug-hfc-input" /></label>
+    <p class="debug-hint">Part d'énergie haute fréquence exigée pour qu'un pic soit jugé percussif. Trop haut = les sauts sont rejetés sur micro peu sensible dans l'aigu.</p>
     <div data-role="debug-legacy-fields">
       <label>hystérésis (0-1) <input type="text" inputmode="decimal" data-role="debug-hysteresis-input" /></label>
       <p class="debug-hint">Fraction du seuil sous laquelle le niveau doit redescendre avant qu'un nouveau saut puisse être compté.</p>
     </div>
     <div data-role="debug-flux-fields">
+      <label>flux lissage (frames) <input type="text" inputmode="numeric" data-role="debug-flux-smooth-input" /></label>
+      <p class="debug-hint">Moyenne mobile appliquée au flux brut. Plus grand = moins de bruit mais pics écrasés (1 frame ≈ 16 ms).</p>
       <label>flux fenêtre (frames) <input type="text" inputmode="numeric" data-role="debug-flux-window-input" /></label>
       <p class="debug-hint">Nombre de frames utilisées pour calculer le seuil adaptatif (~30 = 0,5s). Plus grand = plus lent à s'adapter.</p>
       <label>flux décroissance plancher <input type="text" inputmode="decimal" data-role="debug-flux-decay-input" /></label>
       <p class="debug-hint">Vitesse de redescente du seuil après un pic. Proche de 1 = redescend lentement.</p>
       <label>flux plancher (×σ calib) <input type="text" inputmode="decimal" data-role="debug-flux-floor-input" /></label>
       <p class="debug-hint">Seuil minimum absolu, en multiples de l'écart-type mesuré à la calibration.</p>
+      <label>flux plafond seuil (×bruit) <input type="text" inputmode="decimal" data-role="debug-flux-cap-input" /></label>
+      <p class="debug-hint">Plafond du seuil minimum absolu, en multiples du bruit mesuré en direct. Empêche une calibration polluée de bloquer toute la session.</p>
       <label>flux marge pic <input type="text" inputmode="decimal" data-role="debug-flux-margin-input" /></label>
       <p class="debug-hint">Marge exigée au-dessus du seuil pour valider un pic, ex. 0.1 = +10%.</p>
     </div>
@@ -43,7 +49,11 @@
       <p class="debug-hint">Netteté minimale exigée entre la vallée précédente et le pic, en fraction du seuil.</p>
       <label>flux v2 réarmement (0-1) <input type="text" inputmode="decimal" data-role="debug-flux-rearm-input" /></label>
       <p class="debug-hint">Fraction du seuil sous laquelle le flux doit redescendre avant qu'un nouveau saut puisse être compté.</p>
+      <label>flux v2 réarmement forcé (ms) <input type="text" inputmode="numeric" data-role="debug-flux-rearm-timeout-input" /></label>
+      <p class="debug-hint">Délai après lequel le réarmement est forcé s'il n'a pas eu lieu. Trop haut = plafonne la cadence comptée (1200 ms ≈ 50 sauts/min max).</p>
     </div>
+    <button type="button" class="btn btn-secondary" data-role="debug-copy-trace">Copier la trace</button>
+    <p class="debug-hint">Copie les ~10 dernières secondes de mesures en JSON, pour analyse hors ligne.</p>
   </div>
   <pre data-role="debug-text"></pre>
 </div>

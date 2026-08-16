@@ -20,6 +20,13 @@ Sélectionnables via un slider 3 positions sur l'écran d'accueil, ou via le pan
   du pic depuis la vallée précédente) et un réarmement bas (hystérésis) pour éviter la
   dérive du seuil adaptatif.
 
+Chaîne de signal commune aux trois : l'`AnalyserNode` est ouvert sur -90/0 dBFS (les
+défauts -100/-30 écrêtaient le pic à 255 dès que le gain de sensibilité était appliqué), et
+le flux comme le ratio HFC ne sont calculés que sur la bande ~500 Hz–8 kHz, les bins graves
+noyant l'onset dans le bruit de fond. Les statistiques de calibration du flux sont robustes
+aux valeurs aberrantes (frames d'amorçage écartées + troncature du décile haut) : sans ça,
+un seul outlier verrouille le plancher absolu au-dessus de tout pic atteignable.
+
 ## Consignes
 
 - JS vanilla ES modules uniquement : pas de build, pas de framework, pas de nouvelle

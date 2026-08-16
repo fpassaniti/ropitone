@@ -307,14 +307,21 @@ h2 { font-size: 1.4rem; margin: 0; }
   width: auto;
 }
 .debug-controls [data-role="debug-legacy-fields"],
-.debug-controls [data-role="debug-flux-fields"] {
+.debug-controls [data-role="debug-flux-fields"],
+.debug-controls [data-role="debug-flux-v2-fields"] {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
 }
 .debug-controls [data-role="debug-legacy-fields"][hidden],
-.debug-controls [data-role="debug-flux-fields"][hidden] {
+.debug-controls [data-role="debug-flux-fields"][hidden],
+.debug-controls [data-role="debug-flux-v2-fields"][hidden] {
   display: none;
+}
+.debug-controls [data-role="debug-copy-trace"] {
+  width: auto;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.7rem;
 }
 .debug-hint {
   margin: 0;
